@@ -1,6 +1,6 @@
-# Promozione a Domain Controller, Configurazione di Active Directory e Centralizzazione dei Servizi DHCP
+# Promozione a Domain Controller, Configurazione di Active Directory, GPO e Centralizzazione DHCP
 
-In questa sezione andiamo a realizzare il cuore logico dell'intera identità del nostro laboratorio enterprise indipendente: l'installazione dei **Servizi di dominio Active Directory (AD DS)** su Windows Server 2022 (**DC01**), il join del client Windows 10 e la successiva centralizzazione del ruolo **DHCP**, risolvendo i conflitti di rete monitorati tramite **Zabbix**.
+In questa sezione andiamo a realizzare il cuore logico dell'intera identità del nostro laboratorio enterprise indipendente: l'installazione dei Servizi di dominio Active Directory (AD DS) su Windows Server 2022 (DC01), il join del client Windows 10 e la successiva centralizzazione del ruolo DHCP, risolvendo i conflitti di rete monitorati tramite Zabbix. Infine, consolidiamo la sicurezza degli endpoint implementando una Group Policy Object (GPO) per il controllo degli accessi e l'inibizione del Pannello di Controllo sui client di dominio.
 
 ## 1. Installazione del Ruolo Servizi di dominio Active Directory (AD DS)
 
@@ -239,3 +239,141 @@ Avendo configurato un server DHCP ufficiale all'interno della Active Directory, 
    ![](assets/46.png)
 
 L'allineamento è completato con successo: c'è un solo server DHCP attivo nel dominio, i falsi positivi su Zabbix sono stati azzerati e l'infrastruttura di rete è ora pulita, realistica e centralizzata sotto il controllo del Domain Controller.
+
+---
+
+## Configurazione dei Server d'Inoltro DNS (Forwarder 8.8.8.8)
+
+Dopo il riavvio e il primo logon sul Domain Controller, la macchina è l'autorità suprema per il dominio locale `lab.local`. Tuttavia, non è ancora in grado di risolvere i domini Internet esterni per i client della rete. Procediamo a configurare i server d'inoltro.
+
+- Dalla dashboard principale del **Server Manager**, spostiamo lo sguardo in alto a destra, facciamo click sul menu **Strumenti** (*Tools*) e selezioniamo la voce **DNS** per lanciare la console di gestione nativa (`01.png`).
+  
+  ![](assets/47.png)
+
+- All'interno della finestra **Gestore DNS**, espandiamo l'albero di sinistra, facciamo click destro sul nodo del nostro server **DC01** e selezioniamo l'opzione **Proprietà** dal menu contestuale (`02.png`).
+  
+  ![](assets/48.png)
+
+- Nella finestra delle proprietà del server, spostiamoci sulla scheda **Server d'inoltro** (*Forwarders*) e facciamo click sul pulsante **Modifica...** (*Edit*) posizionato al centro sulla destra (`03.png`).
+  
+  ![](assets/49.png)
+
+- Si apre il pop-up *Modifica server d'inoltro*. Facciamo click all'interno dello spazio editabile che riporta la dicitura *<Fare clic per aggiungere un indirizzo IP o un nome DNS>* (`04.png`).
+  
+  ![](assets/50.png)
+
+- Digitiamo l'indirizzo IP pubblico **`8.8.8.8`** (DNS di Google) e premiamo Invio. Il sistema esegue una convalida automatica in background: quando compare il segno di spunta verde con la risoluzione dell'FQDN **`dns.google`** e lo stato **OK**, facciamo click su **OK** (`05.png`) e successivamente su **Applica** nella schermata precedente per salvare definitivamente.
+  
+  ![](assets/51.png)
+
+## Monitoraggio Enterprise: Installazione e Censimento dello Zabbix Agent su DC01
+
+Per includere il nuovo Domain Controller all'interno della nostra infrastruttura di monitoraggio centralizzata, procediamo con il deploy dell'agente software di Zabbix,
+
+- Apriamo il browser web all'interno del server e navighiamo sulla pagina ufficiale di Zabbix dedicata agli agenti (`https://www.zabbix.com/download_agents`). Selezioniamo la release stabile **7.0 LTS** e, in corrispondenza della voce **Zabbix agent v7.0.27** per Windows `amd64` con supporto OpenSSL, facciamo click sul pulsante verde **DOWNLOAD** per scaricare l'installer in formato `.msi`.
+  
+  ![](assets/52.png)
+
+- Completato il download, apriamo la cartella dei file scaricati ed eseguiamo l'installer con un doppio click. Si aprirà la finestra di benvenuto del wizard grafico: **Welcome to the Zabbix Agent (64-bit) Setup Wizard**. Facciamo click su **Next** per procedere.
+  
+  ![](assets/53.png)
+
+- Nella schermata successiva relativa all'**End-User License Agreement**, andiamo a selezionare la casella di controllo **I accept the terms in the License Agreement** per approvare i termini della licenza GNU GPL v3 e clicchiamo su **Next**.
+  
+  ![](assets/54.png)
+
+- Arriviamo alla maschera fondamentale di configurazione del servizio: **Zabbix Agent service configuration**. All'interno del campo **Host name**, assicuriamoci di digitare esattamente il nome logico della macchina, ovvero **`DC01`**. Nei campi di testo dedicati a **Zabbix server IP/DNS** e **Server or Proxy for active checks**, inseriamo l'indirizzo IP statico del nostro server di monitoraggio: **`192.168.10.50`**. Lasciamo la porta di ascolto di default (`10050`) e andiamo a spuntare l'opzione **Add agent location to the PATH** per facilitare eventuali chiamate da prompt dei comandi. Clicchiamo su **Next**.
+  
+  ![](assets/55.png)
+
+- Nella schermata **Ready to install Zabbix Agent (64-bit)**, confermiamo la correttezza di tutti i parametri inseriti facendo click sul pulsante **Install** per avviare il caricamento del servizio di sistema. Al termine, chiudiamo il wizard cliccando su *Finish*.
+  
+  ![](assets/56.png)
+
+- Spostiamoci ora sulla Web GUI del nostro server di monitoraggio collegandoci all'indirizzo `http://192.168.10.50/zabbix`. Dal menu laterale navighiamo in **Data collection > Hosts** e clicchiamo in alto a destra su *Create host*. All'interno del pannello a comparsa **New host**, compiliamo i campi come segue:
+  
+  - **Host name**: `DC01`
+  
+  - **Templates**: Selezioniamo il template ufficiale **`Windows by Zabbix agent`**
+  
+  - **Host groups**: Associamo l'oggetto al gruppo **`Virtual machines`**
+  
+  - **Interfaces**: Clicchiamo su *Add*, selezioniamo *Agent* e inseriamo nel campo IP address la stringa **`192.168.10.100`** (l'IP del nostro Domain Controller). Lasciamo la porta `10050` e facciamo click sul pulsante blu **Add** in basso.
+  
+  ![](assets/57.png)
+
+- Ritornando sulla tabella riepilogativa degli host, attendiamo qualche istante per permettere all'infrastruttura di completare l'handshake di rete. L'host **DC01** mostrerà l'indicatore **ZBX** all'interno della colonna *Availability* acceso di un colore **verde brillante**, confermando che l'agente risponde correttamente e sta inviando i dati di telemetria.
+  
+  ![](assets/58.png)
+
+- Per mantenere aggiornata la topologia visiva del laboratorio, navighiamo nel menu di sinistra su **Monitoring > Maps** e apriamo la mappa della nostra rete locale. Clicchiamo su *Edit map* e successivamente su *Add element*. Nel pannello delle proprietà dell'elemento (**Map element**), impostiamo il campo *Type* su *Host* e, nel campo di ricerca sotto la dicitura **Host**, selezioniamo la voce **`DC01`**.
+  
+  ![](assets/59.png)
+
+- Tracciamo i collegamenti logici verso il firewall pfSense e salviamo le modifiche. Il risultato finale ci restituisce una mappa topologica centralizzata e pulita, allineata con l'architettura reale del laboratorio enterprise, in cui tutti i nodi (inclusi il client Windows 10 sul `.51` e Lubuntu sul `.52`) si trovano in uno stato nominale contrassegnato dal marker verde **OK**.
+  
+  <img title="" src="assets/60.png" alt="" data-align="center" width="413">
+
+## Sicurezza del Dominio: Configurazione GPO Blocco Pannello di Controllo
+
+Per garantire la conformità e la sicurezza degli endpoint aziendali del laboratorio, applichiamo una Group Policy Object (GPO) legata alla radice del dominio. L'obiettivo è bloccare l'accesso al Pannello di Controllo e all'app Impostazioni a tutti gli utenti non amministrativi.
+
+- Dalla dashboard del **Server Manager**, facciamo click in alto a destra su **Strumenti** (*Tools*) e selezioniamo la voce **Gestione Criteri di gruppo** (*Group Policy Management*) per aprire la console di amministrazione delle GPO.
+  
+  ![](assets/61.png)
+
+- All'interno della console, espandiamo l'albero di sinistra fino a visualizzare la voce relativa alla nostra foresta locale **`Foresta: lab.local`**.
+  
+  ![](assets/62.png)
+
+- Espandiamo la cartella *Domini* e facciamo click destro direttamente sul nome del nostro dominio principale **`lab.local`**. Dal menu contestuale che compare, selezioniamo la primissima opzione: **Crea un oggetto Criteri di gruppo in questo dominio e crea qui un collegamento...**.
+  
+  ![](assets/63.png)
+
+- Nel pop-up *Nuovo oggetto Criteri di gruppo*, inseriamo un nome descrittivo e chiaro all'interno del campo di testo, digitando **`Blocco Pannello Controllo`**. Lasciamo la voce *Oggetto Criteri di gruppo Starter di origine* impostata su *(nessuno)* e confermiamo cliccando su **OK**.
+  
+  ![](assets/64.png)
+
+- Subito dopo, la console mostrerà un messaggio informativo di avviso che ricorda come le modifiche apportate in questa finestra di dialogo verranno applicate all'intero oggetto e a tutte le sue posizioni collegate. Facciamo click su **OK** per superarlo.
+  
+  ![](assets/65.png)
+
+- L'oggetto appena creato apparirà ora correttamente allineato e collegato alla radice di `lab.local`, ereditando di default il filtraggio di sicurezza applicato al gruppo *Authenticated Users*.
+  
+  ![](assets/66.png)
+
+- Per definire le regole interne della policy, facciamo click destro sulla voce **Blocco Pannello Controllo** nell'albero di sinistra e selezioniamo l'opzione **Modifica...** (*Edit*) dal menu a comparsa.
+  
+  ![](assets/67.png)
+
+- Nella nuova finestra dell'*Editor Gestione Criteri di gruppo*, focalizziamo l'attenzione sulla sezione dedicata alle restrizioni del profilo: navighiamo nel percorso **Configurazione utente** > **Criteri** > **Modelli amministrativi: definizioni di criteri (file ADMX)** e selezioniamo la cartella **Pannello di controllo**.
+  
+  ![](assets/68.png)
+
+- Spostandoci nel pannello di destra, individuiamo la voce di impostazione denominata **Impedisci l'accesso al Pannello di controllo e a Impostazioni PC** (che al momento si trova nello stato di default *Non configurato*) e facciamo doppio click su di essa.
+  
+  ![](assets/69.png)
+
+- All'interno della finestra di configurazione del singolo criterio, andiamo a modificare il selettore posizionandolo sulla voce **Attivata** (*Enabled*). Questo forzerà l'inibizione dei file eseguibili `Control.exe` e `SystemSettings.exe` sui client. Per rendere definitiva la configurazione, facciamo click su **Applica** e successivamente su **OK**.
+  
+  ![](assets/70.png)
+
+### Verifica e Testing sui Client di Dominio
+
+Per validare l'effettiva ricezione e applicazione della policy, ci spostiamo su una workstation client (Windows 10) ed eseguiamo i test di accesso con un utente standard del dominio.
+
+- Effettuiamo l'accesso alla workstation client utilizzando l'account dell'utente di dominio standard (es. `Kevin Paladino`) inserendo la password associata nella schermata di login di Windows.
+  
+  ![](assets/71.png)
+
+- Una volta caricato il profilo, apriamo il prompt dei comandi ed eseguiamo il comando **`gpupdate /force`** per richiedere immediatamente al Domain Controller l'allineamento dei criteri. Attendiamo la conferma a schermo dell'avvenuto aggiornamento dei criteri sia per la componente *Computer* che per la componente *Utente*.
+  
+  ![](assets/72.png)
+
+- Proviamo ad aggirare o ad accedere normalmente alle configurazioni cercando il **Pannello di controllo** all'interno della barra di ricerca di Windows.
+  
+  ![](assets/73.png)
+
+- Al tentativo di apertura dell'applicazione, il sistema intercetta la chiamata e blocca l'esecuzione mostrando una finestra pop-up di blocco denominata *Restrizioni*: **"Operazione annullata. Sul computer sono attivate delle restrizioni. Contattare l'amministratore del sistema."**. Questo conferma che la GPO è attiva, funzionante e applicata correttamente al target impostato.
+  
+  ![](assets/74.png)
